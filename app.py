@@ -272,5 +272,19 @@ if uploaded_file:
         status_counts = combined_df['Admin Status'].value_counts()
         st.bar_chart(status_counts)
         st.write('Distribution of jobs by status.')
+
+    # --- Custom Alerts: Past Due Jobs ---
+    st.subheader('Custom Alerts: Past Due Jobs')
+    if 'Expected Production Completion Date' in combined_df.columns and 'Admin Status' in combined_df.columns:
+        df_alerts = combined_df.copy()
+        df_alerts['Expected Production Completion Date'] = pd.to_datetime(df_alerts['Expected Production Completion Date'], errors='coerce')
+        today = pd.Timestamp.today().normalize()
+        mask = (df_alerts['Expected Production Completion Date'] < today) & (df_alerts['Admin Status'] != 'Ready to Ship')
+        past_due_jobs = df_alerts[mask]
+        if not past_due_jobs.empty:
+            st.warning(f"{len(past_due_jobs)} job(s) are past due and not marked as 'Ready to Ship':")
+            st.dataframe(past_due_jobs[['job number', 'Expected Production Completion Date', 'Admin Status', 'CSR', 'Production Station', 'Customer', 'Description']])
+        else:
+            st.success('No past due jobs found!')
 else:
     st.info("Please upload a .xlsx file with multiple sheets.")
