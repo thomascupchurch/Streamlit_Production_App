@@ -1,5 +1,3 @@
-
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -233,5 +231,46 @@ if uploaded_file:
                 st.write(f"Last day seen: {job_tracking.loc[real_idx, 'last_day']}")
             else:
                 st.warning("Job number not found.")
+
+    # --- Production Station Flow ---
+    st.subheader('Production Station Flow')
+    if 'Production Station' in combined_df.columns:
+        station_counts = combined_df['Production Station'].value_counts().sort_values(ascending=False)
+        st.bar_chart(station_counts)
+        st.write('Number of jobs at each production station.')
+
+    # --- Job Aging ---
+    st.subheader('Job Aging (Longest Open/In Progress)')
+    import pandas as pd
+    from datetime import datetime
+    if 'Admin Status' in combined_df.columns and 'Entered Date' in combined_df.columns:
+        # Parse dates
+        df_aging = combined_df.copy()
+        df_aging['Entered Date'] = pd.to_datetime(df_aging['Entered Date'], errors='coerce')
+        today = pd.Timestamp.today()
+        df_aging['days_open'] = (today - df_aging['Entered Date']).dt.days
+        aging_jobs = df_aging[df_aging['Admin Status'].isin(['Open', 'In Progress'])]
+        aging_jobs = aging_jobs[['job number', 'Admin Status', 'Entered Date', 'days_open', 'CSR', 'Production Station']]
+        aging_jobs = aging_jobs.sort_values('days_open', ascending=False).head(20)
+        st.dataframe(aging_jobs)
+        st.write('Top 20 jobs that have been open or in progress the longest.')
+
+    # --- Revenue Forecast ---
+    st.subheader('Revenue Forecast (Next 30 Days)')
+    if 'Expected Production Completion Date' in combined_df.columns and 'Amount to Invoice' in combined_df.columns:
+        df_rev = combined_df.copy()
+        df_rev['Expected Production Completion Date'] = pd.to_datetime(df_rev['Expected Production Completion Date'], errors='coerce')
+        df_rev['Amount to Invoice'] = pd.to_numeric(df_rev['Amount to Invoice'], errors='coerce')
+        next_30 = pd.Timestamp.today() + pd.Timedelta(days=30)
+        mask = (df_rev['Expected Production Completion Date'] >= pd.Timestamp.today()) & (df_rev['Expected Production Completion Date'] <= next_30)
+        forecast = df_rev[mask]['Amount to Invoice'].sum()
+        st.metric('Expected Revenue (next 30 days)', f"${forecast:,.2f}")
+
+    # --- Status Distribution ---
+    st.subheader('Job Status Distribution')
+    if 'Admin Status' in combined_df.columns:
+        status_counts = combined_df['Admin Status'].value_counts()
+        st.bar_chart(status_counts)
+        st.write('Distribution of jobs by status.')
 else:
     st.info("Please upload a .xlsx file with multiple sheets.")
