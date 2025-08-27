@@ -59,6 +59,14 @@ if uploaded_file:
                 data[sheet][col] = pd.to_numeric(data[sheet][col], errors='ignore')
     combined_df = pd.concat(data.values(), ignore_index=True)
 
+    # Utility: robust column finder
+    def find_col(df, name):
+        name = name.strip().lower()
+        for col in df.columns:
+            if col.strip().lower() == name:
+                return col
+        return None
+
     # --- Pace Reports logic ---
     if pace_files:
         pace_dfs = []
@@ -236,8 +244,13 @@ if uploaded_file:
     st.subheader('Production Station Flow')
     if 'Production Station' in combined_df.columns:
         station_counts = combined_df['Production Station'].value_counts().sort_values(ascending=False)
-        st.bar_chart(station_counts)
-        st.write('Number of jobs at each production station.')
+        if not station_counts.empty:
+            st.bar_chart(station_counts)
+            st.write('Number of jobs at each production station.')
+        else:
+            st.info('No jobs found at any production station.')
+    else:
+        st.info('Column "Production Station" not found.')
 
     # --- Job Aging ---
     st.subheader('Job Aging (Longest Open/In Progress)')
@@ -252,8 +265,13 @@ if uploaded_file:
         aging_jobs = df_aging[df_aging['Admin Status'].isin(['Open', 'In Progress'])]
         aging_jobs = aging_jobs[['job number', 'Admin Status', 'Entered Date', 'days_open', 'CSR', 'Production Station']]
         aging_jobs = aging_jobs.sort_values('days_open', ascending=False).head(20)
-        st.dataframe(aging_jobs)
-        st.write('Top 20 jobs that have been open or in progress the longest.')
+        if not aging_jobs.empty:
+            st.dataframe(aging_jobs)
+            st.write('Top 20 jobs that have been open or in progress the longest.')
+        else:
+            st.info('No open or in progress jobs found.')
+    else:
+        st.info('Required columns "Admin Status" and/or "Entered Date" not found.')
 
     # --- Revenue Forecast ---
     st.subheader('Revenue Forecast (Next 30 Days)')
@@ -265,26 +283,45 @@ if uploaded_file:
         mask = (df_rev['Expected Production Completion Date'] >= pd.Timestamp.today()) & (df_rev['Expected Production Completion Date'] <= next_30)
         forecast = df_rev[mask]['Amount to Invoice'].sum()
         st.metric('Expected Revenue (next 30 days)', f"${forecast:,.2f}")
+        st.caption(f"Jobs considered: {df_rev[mask].shape[0]}")
+    else:
+        st.info('Required columns "Expected Production Completion Date" and/or "Amount to Invoice" not found.')
 
     # --- Status Distribution ---
     st.subheader('Job Status Distribution')
     if 'Admin Status' in combined_df.columns:
         status_counts = combined_df['Admin Status'].value_counts()
-        st.bar_chart(status_counts)
-        st.write('Distribution of jobs by status.')
-
-    # --- Custom Alerts: Past Due Jobs ---
-    st.subheader('Custom Alerts: Past Due Jobs')
-    if 'Expected Production Completion Date' in combined_df.columns and 'Admin Status' in combined_df.columns:
-        df_alerts = combined_df.copy()
-        df_alerts['Expected Production Completion Date'] = pd.to_datetime(df_alerts['Expected Production Completion Date'], errors='coerce')
-        today = pd.Timestamp.today().normalize()
-        mask = (df_alerts['Expected Production Completion Date'] < today) & (df_alerts['Admin Status'] != 'Ready to Ship')
-        past_due_jobs = df_alerts[mask]
-        if not past_due_jobs.empty:
-            st.warning(f"{len(past_due_jobs)} job(s) are past due and not marked as 'Ready to Ship':")
-            st.dataframe(past_due_jobs[['job number', 'Expected Production Completion Date', 'Admin Status', 'CSR', 'Production Station', 'Customer', 'Description']])
+        if not status_counts.empty:
+            st.bar_chart(status_counts)
+            st.write('Distribution of jobs by status.')
         else:
-            st.success('No past due jobs found!')
+            st.info('No jobs found for status distribution.')
+    else:
+        st.info('Column "Admin Status" not found.')
+
+    # --- Custom Alerts: Likely to Pass Promise Date ---
+    st.subheader('Custom Alerts: Likely to Pass Promise Date')
+    # Robust column matching
+    col_promise = find_col(combined_df, 'Promise Date')
+    col_due = find_col(combined_df, 'Expected Production Completion Date')
+    display_cols = ['job number', col_promise, col_due, 'CSR', 'Production Station', 'Customer', 'Description']
+    if col_promise and col_due:
+        df_alerts = combined_df.copy()
+        df_alerts[col_promise] = pd.to_datetime(df_alerts[col_promise], errors='coerce')
+        df_alerts[col_due] = pd.to_datetime(df_alerts[col_due], errors='coerce')
+        today = pd.Timestamp.today().normalize()
+        # Exclude jobs with promise dates before today
+        mask = (df_alerts[col_due] > df_alerts[col_promise]) & (df_alerts[col_promise] >= today)
+        likely_late_jobs = df_alerts[mask]
+        # Only keep columns that exist in the DataFrame
+        display_cols_final = [c for c in display_cols if c and c in df_alerts.columns]
+        if not likely_late_jobs.empty:
+            st.warning(f"{len(likely_late_jobs)} job(s) are forecasted to miss their Promise Date:")
+            st.dataframe(likely_late_jobs[display_cols_final])
+        else:
+            st.success('No jobs are currently forecasted to miss their Promise Date!')
+        st.caption(f"Jobs checked: {df_alerts.shape[0]}")
+    else:
+        st.info(f'Required columns not found. Columns present: {list(combined_df.columns)}')
 else:
     st.info("Please upload a .xlsx file with multiple sheets.")
